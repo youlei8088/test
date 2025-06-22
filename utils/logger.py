@@ -63,7 +63,7 @@ class GUILogger(QObject):
             self.text_edit.setTextCursor(cursor)
 
 
-        self.text_edit.appendPlainText(message) # appendPlainText automatically scrolls to the bottom
+        self.text_edit.append(message) # Changed from appendPlainText to append
         # self.text_edit.ensureCursorVisible() # Alternative way to scroll to bottom
 
     def log(self, message):

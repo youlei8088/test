@@ -125,7 +125,7 @@ class CANHandler:
                 dll_load_path = found_path
 
             self._log(f"Attempting to load CAN library from: {dll_load_path}")
-            self.can_lib = ctypes.cdll.LoadLibrary(dll_load_path)
+            self.can_lib = ctypes.windll.LoadLibrary(dll_load_path) # Changed to windll
             self._setup_api_prototypes() # Define argtypes and restypes for DLL functions
             self._log(f"{self.dll_path} loaded successfully from {dll_load_path}.")
         except OSError as e:
@@ -165,9 +165,17 @@ class CANHandler:
         self.can_lib.VCI_ResetCAN.argtypes = [ctypes.c_uint, ctypes.c_uint, ctypes.c_uint]
         self.can_lib.VCI_ResetCAN.restype = ctypes.c_ulong
 
-        # VCI_StopCAN(DWORD DeviceType, DWORD DeviceInd, DWORD CANInd) - ZLG specific, good for cleanup
-        self.can_lib.VCI_StopCAN.argtypes = [ctypes.c_uint, ctypes.c_uint, ctypes.c_uint]
-        self.can_lib.VCI_StopCAN.restype = ctypes.c_ulong
+        # VCI_StopCAN - This function may not exist in all ControlCAN.dll versions or is named differently.
+        # If VCI_StopCAN is not found, it indicates that it might not be available or necessary
+        # for the specific DLL version being used. The close() method will still attempt to
+        # call VCI_CloseDevice. Some ZLG documentation uses VCI_ResetCAN for channel stop.
+        # For now, we assume it exists as per the original code's structure but log if issues.
+        if hasattr(self.can_lib, 'VCI_StopCAN'):
+            self.can_lib.VCI_StopCAN.argtypes = [ctypes.c_uint, ctypes.c_uint, ctypes.c_uint]
+            self.can_lib.VCI_StopCAN.restype = ctypes.c_ulong
+        else:
+            self._log("VCI_StopCAN function not found in the DLL. Channel stop might rely on VCI_ResetCAN or VCI_CloseDevice implicitly.")
+
 
         # VCI_Transmit(DWORD DeviceType, DWORD DeviceInd, DWORD CANInd, PVCI_CAN_OBJ pSend, ULONG Len)
         self.can_lib.VCI_Transmit.argtypes = [ctypes.c_uint, ctypes.c_uint, ctypes.c_uint, ctypes.POINTER(VCI_CAN_OBJ), ctypes.c_uint]
@@ -186,7 +194,7 @@ class CANHandler:
         self.can_lib.VCI_ClearBuffer.restype = ctypes.c_ulong
 
 
-    def open(self, acc_code=0x00000000, acc_mask=0xFFFFFFFF,
+    def open(self, acc_code=0x80000000, acc_mask=0xFFFFFFFF, # acc_code default changed
              timing0=0x00, timing1=0x14, mode=0): # Default to 1Mbps
         """
         Opens the CAN device, initializes a CAN channel, and starts it.
@@ -225,7 +233,7 @@ class CANHandler:
         init_config = VCI_INIT_CONFIG()
         init_config.AccCode = acc_code
         init_config.AccMask = acc_mask
-        init_config.Filter = 0  # 0: Receive all frames. 1: Dual filter. 2: Single filter.
+        init_config.Filter = 1  # Filter mode set to 1 (Receive all types)
         init_config.Timing0 = timing0
         init_config.Timing1 = timing1
         init_config.Mode = mode    # 0: Normal, 1: Loopback, 2: Listen-only (silent)
@@ -246,9 +254,10 @@ class CANHandler:
         self._log(f"CAN channel {self.can_idx} started successfully.")
 
         # Clear any old messages from hardware/driver buffers
-        self.clear_buffer()
+        # self.clear_buffer() # Moved after self.is_open = True
 
-        self.is_open = True
+        self.is_open = True # Set is_open before potentially calling clear_buffer
+        self.clear_buffer() # Clear buffer after device is confirmed open and initialized
         return True
 
     def close(self):
@@ -263,12 +272,21 @@ class CANHandler:
             return
 
         # Good practice: Stop the CAN channel before closing the device
-        # VCI_ResetCAN could also be used, VCI_StopCAN is ZLG specific but often available.
-        stop_ret = self.can_lib.VCI_StopCAN(self.device_type, self.device_idx, self.can_idx)
-        if stop_ret != STATUS_OK:
-            self._log(f"Warning: VCI_StopCAN for channel {self.can_idx} failed with code {stop_ret}, but proceeding to close device.")
+        if hasattr(self.can_lib, 'VCI_StopCAN'):
+            stop_ret = self.can_lib.VCI_StopCAN(self.device_type, self.device_idx, self.can_idx)
+            if stop_ret != STATUS_OK:
+                self._log(f"Warning: VCI_StopCAN for channel {self.can_idx} failed with code {stop_ret}, but proceeding to close device.")
+            else:
+                self._log(f"CAN channel {self.can_idx} stopped via VCI_StopCAN.")
+        elif hasattr(self.can_lib, 'VCI_ResetCAN'):
+            # Fallback to VCI_ResetCAN if VCI_StopCAN is not available, as some versions use this
+            reset_ret = self.can_lib.VCI_ResetCAN(self.device_type, self.device_idx, self.can_idx)
+            if reset_ret != STATUS_OK:
+                self._log(f"Warning: VCI_ResetCAN (as fallback for stop) for channel {self.can_idx} failed with code {reset_ret}, but proceeding to close device.")
+            else:
+                self._log(f"CAN channel {self.can_idx} reset (used as stop) via VCI_ResetCAN.")
         else:
-            self._log(f"CAN channel {self.can_idx} stopped.")
+            self._log(f"Neither VCI_StopCAN nor VCI_ResetCAN found or succeeded for channel {self.can_idx}. Proceeding to close device.")
 
         # Close the physical device
         ret = self.can_lib.VCI_CloseDevice(self.device_type, self.device_idx)
@@ -349,6 +367,53 @@ class CANHandler:
         else:
             self._log(f"Failed to transmit CAN message to ID {motor_id_tx:X}. VCI_Transmit returned: {num_sent}")
             # self._log(f"Message details: ID={can_msg.ID}, DataLen={can_msg.DataLen}, Data={list(can_msg.Data)[:can_msg.DataLen]}")
+            return False
+
+    def send_raw_command(self, motor_id_tx: int, raw_data: list[int], extern_flag: int = 0, remote_flag: int = 0, send_type: int = 0):
+        """
+        Sends a raw 8-byte CAN command. Used for special commands like 'Enter Motor Mode'.
+
+        Args:
+            motor_id_tx (int): The CAN ID to which the command should be sent.
+            raw_data (list[int]): A list of 8 integers (bytes) for the CAN data payload.
+            extern_flag (int): 0 for Standard Frame, 1 for Extended Frame. Defaults to 0.
+            remote_flag (int): 0 for Data Frame, 1 for Remote Frame. Defaults to 0.
+            send_type (int): Send type (0:normal, 1:single, 2:self-rx, 3:single-self-rx). Defaults to 0.
+
+
+        Returns:
+            bool: True if the command was transmitted successfully, False otherwise.
+        """
+        if not self.is_open or not self.can_lib:
+            self._log("CAN device not open. Cannot send raw command.")
+            return False
+
+        if len(raw_data) != 8:
+            self._log(f"Error: raw_data for send_raw_command must be a list of 8 bytes. Got {len(raw_data)} bytes.")
+            return False
+
+        can_msg = VCI_CAN_OBJ()
+        can_msg.ID = motor_id_tx
+        can_msg.SendType = send_type
+        can_msg.RemoteFlag = remote_flag
+        can_msg.ExternFlag = extern_flag # Typically 0 for standard 11-bit ID
+        can_msg.DataLen = 8 # Fixed at 8 bytes for these commands
+
+        # Copy raw_data bytes into the Data field of the CAN message structure
+        for i in range(8):
+            can_msg.Data[i] = raw_data[i]
+
+        # data_hex_str = " ".join([f"{b:02X}" for b in raw_data]) # For debugging
+        # self._log(f"Attempting to send RAW command to ID {motor_id_tx:X}: {data_hex_str}")
+
+        num_sent = self.can_lib.VCI_Transmit(self.device_type, self.device_idx, self.can_idx,
+                                             ctypes.byref(can_msg), 1)
+
+        if num_sent > 0 and num_sent != 0xFFFFFFFF:
+            # self._log(f"Successfully sent raw command ({num_sent} frame(s)) to ID {motor_id_tx:X}.")
+            return True
+        else:
+            self._log(f"Failed to transmit raw CAN message to ID {motor_id_tx:X}. VCI_Transmit returned: {num_sent}")
             return False
 
 

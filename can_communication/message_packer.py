@@ -1,11 +1,11 @@
 import struct
 import numpy as np
 
-# Constants based on firmware/hardware
-P_MIN, P_MAX = -12.5, 12.5  # rad
-V_MIN, V_MAX = -65.0, 65.0  # rad/s
-T_MIN, T_MAX = -18.0, 18.0  # Nm (torque)
-KP_MIN, KP_MAX = 0.0, 500.0 # N-m/rad
+# Constants based on firmware/hardware and mit手算.docx
+P_MIN, P_MAX = -95.5, 95.5  # rad (Updated as per mit手算.docx)
+V_MIN, V_MAX = -45.0, 45.0  # rad/s (Updated as per mit手算.docx)
+T_MIN, T_MAX = -18.0, 18.0  # Nm (torque) - Assuming this remains the same or is covered by mit手算.docx if different
+KP_MIN, KP_MAX = 0.0, 500.0 # N-m/rad - Assuming this remains the same or is covered by mit手算.docx if different
 KD_MIN, KD_MAX = 0.0, 5.0   # N-m/(rad/s)
 
 # These helper functions are crucial for converting floating-point physical values

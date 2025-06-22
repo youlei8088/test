@@ -135,33 +135,48 @@ class ParamPanel(QWidget):
 
     def _on_kp_dial_changed(self, value):
         """Handles Kp QDial value change: updates Kp QDoubleSpinBox and emits parametersChanged."""
-        # Unscale dial value (integer) to float for spinbox
-        self.kp_spinbox.setValue(float(value) / 100.0)
-        self._emit_parameters_changed() # Emit signal with all current parameters
+        new_val = float(value) / 100.0
+        self.kp_spinbox.blockSignals(True)
+        self.kp_spinbox.setValue(new_val)
+        self.kp_spinbox.blockSignals(False)
+        self._emit_parameters_changed()
+
     def _on_kp_spinbox_changed(self, value):
-        """Handles Kp QDoubleSpinBox value change: updates Kp QDial."""
-        # Scale spinbox value (float) to integer for dial
+        """Handles Kp QDoubleSpinBox value change: updates Kp QDial and emits parametersChanged."""
+        self.kp_dial.blockSignals(True)
         self.kp_dial.setValue(int(value * 100))
-        # Note: parametersChanged is not emitted here to avoid double emission,
-        # as the dial change (triggered by this) will emit it.
-        # If direct spinbox changes should also immediately emit, add it here and manage potential recursion.
-        # For simplicity, assuming dial change is the primary trigger for emission after sync.
+        self.kp_dial.blockSignals(False)
+        self._emit_parameters_changed() # Emit on spinbox change too for consistent behavior
 
     def _on_kd_dial_changed(self, value):
         """Handles Kd QDial value change: updates Kd QDoubleSpinBox and emits parametersChanged."""
-        self.kd_spinbox.setValue(float(value) / 100.0)
+        new_val = float(value) / 100.0
+        self.kd_spinbox.blockSignals(True)
+        self.kd_spinbox.setValue(new_val)
+        self.kd_spinbox.blockSignals(False)
         self._emit_parameters_changed()
+
     def _on_kd_spinbox_changed(self, value):
-        """Handles Kd QDoubleSpinBox value change: updates Kd QDial."""
+        """Handles Kd QDoubleSpinBox value change: updates Kd QDial and emits parametersChanged."""
+        self.kd_dial.blockSignals(True)
         self.kd_dial.setValue(int(value * 100))
+        self.kd_dial.blockSignals(False)
+        self._emit_parameters_changed()
 
     def _on_t_ff_dial_changed(self, value):
         """Handles T_ff QDial value change: updates T_ff QDoubleSpinBox and emits parametersChanged."""
-        self.t_ff_spinbox.setValue(float(value) / 100.0)
+        new_val = float(value) / 100.0
+        self.t_ff_spinbox.blockSignals(True)
+        self.t_ff_spinbox.setValue(new_val)
+        self.t_ff_spinbox.blockSignals(False)
         self._emit_parameters_changed()
+
     def _on_t_ff_spinbox_changed(self, value):
-        """Handles T_ff QDoubleSpinBox value change: updates T_ff QDial."""
+        """Handles T_ff QDoubleSpinBox value change: updates T_ff QDial and emits parametersChanged."""
+        self.t_ff_dial.blockSignals(True)
         self.t_ff_dial.setValue(int(value * 100))
+        self.t_ff_dial.blockSignals(False)
+        self._emit_parameters_changed()
 
     def _emit_parameters_changed(self):
         """Helper method to gather current Kp, Kd, T_ff values and emit the signal."""

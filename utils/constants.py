@@ -95,7 +95,7 @@ CYCLE_POS_B_RAD = ANGLE_MIN_DEG * DEG_TO_RAD # Typically -120 deg converted to r
 # MOTOR_CMD_CAN_ID: The CAN ID to which commands for the motor are sent.
 # This might be specific to the motor (e.g., motor 1 = ID 0x01, or a manufacturer-defined ID like 0x141).
 # The problem statement mentions "固件通过CAN总线接收实时的PD控制指令". This ID is for that.
-MOTOR_CMD_CAN_ID = 0x01  # Default CAN ID for sending commands to the motor (e.g., Motor 1).
+MOTOR_CMD_CAN_ID = 0x141 # Set as per requirement "确保 MOTOR_CMD_CAN_ID 被设置为 0x141"
                          # This needs to be verified against the GIM6010 firmware documentation.
                          # Common GIM6010 IDs are 0x140 + motor_number.
 

@@ -469,13 +469,48 @@ class MainWindow(QMainWindow):
         self.logger.log("Disconnected from serial port.")
 
     def _enable_motor(self):
-        """Sends the 'enable motor' command via serial."""
-        if self.serial_handler.ser and self.serial_handler.ser.is_open:
-            self.logger.log("Sending 'Enable Motor' (m) command via serial...")
-            self.serial_handler.enable_motor()
-        else:
+        """Sends the 'enable motor' command via serial ('m') AND the CAN 'Enter Motor Mode' command."""
+        if not (self.serial_handler.ser and self.serial_handler.ser.is_open):
             self.logger.log("Cannot enable motor: Serial port not connected.")
-            QMessageBox.warning(self, "Serial Error", "Serial port not connected. Cannot enable motor.")
+            QMessageBox.warning(self, "Serial Error", "Serial port not connected. Cannot perform serial part of enable sequence.")
+            return
+
+        self.logger.log("Step 1: Sending 'Enable Motor' (m) command via serial...")
+        serial_success = self.serial_handler.enable_motor() # Assuming this returns True on success or similar
+
+        if not serial_success:
+            self.logger.log("Failed to send serial 'm' command or serial port error during enable.")
+            QMessageBox.warning(self, "Serial Error", "Failed to send 'm' command via serial. Motor not enabled.")
+            return
+
+        self.logger.log("Serial 'm' command sent successfully.")
+
+        # Proceed to CAN command only if serial was successful
+        if not (self.can_handler and self.can_handler.is_open):
+            self.logger.log("Cannot complete motor enable: CAN is not connected/open. Serial 'm' was sent, but motor may not be fully operational without CAN 'Enter Motor Mode' command.")
+            QMessageBox.warning(self, "CAN Error", "CAN is not connected. Serial 'm' sent, but 'Enter Motor Mode' CAN command cannot be sent. Motor might not be fully active.")
+            return
+
+        self.logger.log(f"Step 2: Sending CAN 'Enter Motor Mode' command to ID {const.MOTOR_CMD_CAN_ID:X}...")
+        # Data for "Enter Motor Mode" command: [0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFC]
+        enter_motor_mode_data = [0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFC]
+
+        # Using the new send_raw_command method from can_handler
+        # Parameters for send_raw_command: motor_id_tx, raw_data, extern_flag=0, remote_flag=0, send_type=0
+        # For MIT Cheetah, it's typically standard frame (ExternFlag=0) and data frame (RemoteFlag=0).
+        can_success = self.can_handler.send_raw_command(
+            motor_id_tx=const.MOTOR_CMD_CAN_ID,
+            raw_data=enter_motor_mode_data,
+            extern_flag=0, # Standard CAN ID
+            remote_flag=0  # Data frame
+        )
+
+        if can_success:
+            self.logger.log("CAN 'Enter Motor Mode' command sent successfully. Motor should now be fully enabled.")
+            QMessageBox.information(self, "Motor Enabled", "Motor enable sequence (Serial 'm' + CAN 'Enter Mode') completed successfully.")
+        else:
+            self.logger.log("Failed to send CAN 'Enter Motor Mode' command. Serial 'm' was sent, but motor may not be fully operational.")
+            QMessageBox.warning(self, "CAN Command Error", "Failed to send 'Enter Motor Mode' CAN command. Motor might not be fully active.")
 
     def _disable_motor_serial(self):
         """Sends the 'disable motor' (ESC) command via serial."""
@@ -543,12 +578,12 @@ class MainWindow(QMainWindow):
     def _connect_can(self):
         """Handles connecting to the CAN device and starting the CAN communication thread."""
         self.logger.log("Attempting to connect to CAN device...")
-        # Default to 1Mbps baud rate (Timing0=0x00, Timing1=0x14 for ZLG CANalyst-II)
-        # This should match the firmware's CAN baud rate.
-        if self.can_handler.open(timing0=0x00, timing1=0x14):
+        # Using specified timing parameters for 1000k bps: Timing0=0x00, Timing1=0x14
+        # AccCode=0x80000000 and Filter=1 are now defaults in can_handler.open()
+        if self.can_handler.open(timing0=0x00, timing1=0x14): # AccCode and Filter handled by can_handler defaults
             self.param_panel.set_can_connection_status(True)    # Update ParamPanel UI
             self.motion_panel.set_motion_controls_enabled(True) # Enable MotionPanel controls
-            self.logger.log("CAN device opened successfully.")
+            self.logger.log("CAN device opened successfully with Timing0=0x00, Timing1=0x14 (1Mbps).")
 
             # Stop existing CAN thread if it's running, before starting a new one
             if self.can_comm_thread and self.can_comm_thread.isRunning():
